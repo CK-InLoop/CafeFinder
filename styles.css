@@ -187,6 +187,55 @@ button.active {
     100% { transform: rotate(360deg); }
 }
 
+/* Toast Notifications */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background-color: #5d4037;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    opacity: 0;
+    transition: all 0.3s ease;
+}
+
+.toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
+/* Save/Remove Buttons */
+.save-btn {
+    background-color: #4caf50 !important;
+    margin-top: 10px;
+    width: 100%;
+}
+
+.save-btn:hover {
+    background-color: #388e3c !important;
+}
+
+.remove-btn {
+    background-color: #f44336 !important;
+    margin-top: 10px;
+    width: 100%;
+}
+
+.remove-btn:hover {
+    background-color: #d32f2f !important;
+}
+
+/* Active state for navigation buttons */
+.nav-btn.active {
+    background-color: #5d4037;
+    color: white;
+    border-color: #5d4037;
+}
+
 /* Responsive design */
 @media (max-width: 768px) {
     .container {

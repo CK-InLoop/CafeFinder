@@ -79,15 +79,15 @@ async function useLocation(lat, lng) {
             [out:json];
             (
               // Search for cafes and coffee shops
-              node["amenity"="cafe"](around:20000,${lat},${lng});
-              node["amenity"="coffee_shop"](around:20000,${lat},${lng});
-              node["shop"="coffee"](around:20000,${lat},${lng});
+              node["amenity"="cafe"](around:200000,${lat},${lng});
+              node["amenity"="coffee_shop"](around:200000,${lat},${lng});
+              node["shop"="coffee"](around:200000,${lat},${lng});
               
               // Also search for restaurants that might serve coffee
-              node["amenity"="restaurant"]["cuisine"~"coffee|cafe"](around:20000,${lat},${lng});
+              node["amenity"="restaurant"]["cuisine"~"coffee|cafe"](around:200000,${lat},${lng});
               
               // Search for any food/drink related places that might serve coffee
-              node["amenity"~"cafe|restaurant|bar|fast_food"]["name"~"[Cc]afe|[Cc]offee",i](around:20000,${lat},${lng});
+              node["amenity"~"cafe|restaurant|bar|fast_food"]["name"~"[Cc]afe|[Cc]offee",i](around:200000,${lat},${lng});
             );
             out body;
             >;
@@ -288,14 +288,14 @@ function processOsmData(elements) {
 }
 
 // Display cafe cards
-function displayCards(cafes) {
+function displayCards(cafes, isSavedList = false) {
     cardsContainer.innerHTML = '';
     
     if (!cafes || cafes.length === 0) {
         cardsContainer.innerHTML = `
             <div class="no-results">
-                <h3>No cafés found</h3>
-                <p>We couldn't find any cafés in your area. Try moving to a different location.</p>
+                <h3>No ${isSavedList ? 'saved' : 'cafés'} found</h3>
+                <p>We couldn't find any ${isSavedList ? 'saved' : 'cafés'} in your area. Try moving to a different location.</p>
                 <button id="refreshBtn" class="btn">Try Again</button>
             </div>
         `;
@@ -330,6 +330,9 @@ function displayCards(cafes) {
             if (cafe.tags.phone) description += ` | Phone: ${cafe.tags.phone}`;
         }
         
+        // Add save hint for new cafes
+        const saveHint = isSavedList ? '' : '<p class="save-hint">Swipe right to save 💖</p>';
+        
         // Create card HTML
         const card = document.createElement('div');
         card.className = 'location-card';
@@ -341,10 +344,10 @@ function displayCards(cafes) {
             <div class="cafe-details">
                 ${description ? `<p>${description}</p>` : ''}
                 <div class="cafe-actions">
-                    ${cafe.tags.website ? `<a href="${cafe.tags.website}" target="_blank" class="btn">Visit Website</a>` : ''}
-                    ${cafe.tags.phone ? `<a href="tel:${cafe.tags.phone}" class="btn">Call Now</a>` : ''}
+                    ${cafe.tags?.website ? `<a href="${cafe.tags.website}" target="_blank" class="btn">Website</a>` : ''}
+                    ${cafe.tags?.phone ? `<a href="tel:${cafe.tags.phone}" class="btn">Call Now</a>` : ''}
+                    ${saveHint}
                 </div>
-                <p class="save-hint"><small>Swipe right to save 💖</small></p>
             </div>
         `;
         
@@ -354,64 +357,88 @@ function displayCards(cafes) {
         // Initialize Hammer.js for swipe gestures
         const hammertime = new Hammer(wrapper);
         
+        // Only add swipe right for saving on non-saved lists
+        if (!isSavedList) {
+            hammertime.on('swiperight', () => {
+                swipeCard(wrapper, 'right', cafe);
+            });
+        }
+        
+        // Always allow swipe left to dismiss
         hammertime.on('swipeleft', () => {
             swipeCard(wrapper, 'left');
-        });
-        
-        hammertime.on('swiperight', () => {
-            saveCafe(cafeData);
-            swipeCard(wrapper, 'right');
         });
     });
 }
 
 // Handle card swipe animation
-function swipeCard(element, direction) {
+function swipeCard(element, direction, cafe) {
     element.style.transform = `translateX(${direction === 'left' ? '-' : ''}150%) rotate(${direction === 'left' ? '-15' : '15'}deg)`;
     element.style.opacity = '0';
+    
+    if (direction === 'right' && cafe) {
+        handleSwipeRight(cafe);
+    }
+    
     setTimeout(() => element.remove(), 300);
 }
 
-// Save cafe to local storage
-function saveCafe(cafe) {
-    let savedCafes = JSON.parse(localStorage.getItem('savedCafes') || '[]');
-    
-    // Check if cafe is already saved
-    if (!savedCafes.some(c => c.place_id === cafe.place_id)) {
+// Handle saving a cafe with right swipe
+function handleSwipeRight(cafe) {
+    const savedCafes = JSON.parse(localStorage.getItem('savedCafes') || '[]');
+
+    if (!savedCafes.some(c => c.id === cafe.id)) {
         savedCafes.push(cafe);
         localStorage.setItem('savedCafes', JSON.stringify(savedCafes));
-        showNotification(`${cafe.name} saved to your list!`);
-    } else {
-        showNotification(`${cafe.name} is already in your saved list.`);
+        showToast('Café saved!');
     }
+}
+
+// Show a toast notification
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    // Show the toast
+    setTimeout(() => toast.classList.add('show'), 100);
+
+    // Hide after 3 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
 }
 
 // Show saved cafes
 function showSaved() {
     showLoading(true);
     cardsContainer.innerHTML = '';
-    
+
+    // Update active button states
+    savedBtn.classList.add('active');
+    findNewBtn.classList.remove('active');
+
+    // Get saved cafes from localStorage
     const savedCafes = JSON.parse(localStorage.getItem('savedCafes') || '[]');
-    
+
     if (savedCafes.length === 0) {
-        cardsContainer.innerHTML = '<p>No saved cafés yet. Swipe right on a café to save it!</p>';
-        showLoading(false);
-        return;
-    }
-    
-    savedCafes.forEach((cafe, index) => {
-        const card = document.createElement('div');
-        card.className = 'location-card';
-        card.style.margin = '10px 0';
-        card.innerHTML = `
-            <img src="${cafe.photo}" alt="${cafe.name}" />
-            <h3>${cafe.name}</h3>
-            <p>⭐ ${cafe.rating}/5</p>
-            <p>📍 ${cafe.address || 'Address not available'}</p>
+        cardsContainer.innerHTML = `
+            <div class="no-results">
+                <h3>No saved cafés yet</h3>
+                <p>Swipe right on a café to save it!</p>
+                <button id="findNewBtn2" class="btn">Find Cafés</button>
+            </div>
         `;
-        
-        cardsContainer.appendChild(card);
-    });
+        document.getElementById('findNewBtn2')?.addEventListener('click', () => {
+            getLocation();
+            findNewBtn.classList.add('active');
+            savedBtn.classList.remove('active');
+        });
+    } else {
+        displayCards(savedCafes, true);
+    }
     
     showLoading(false);
 }
@@ -429,28 +456,9 @@ function showLoading(isLoading) {
     }
 }
 
-// Show notification
+// Show notification (legacy, using showToast instead)
 function showNotification(message) {
-    const notification = document.createElement('div');
-    notification.className = 'notification';
-    notification.textContent = message;
-    
-    document.body.appendChild(notification);
-    
-    // Add styles for the notification
-    notification.style.position = 'fixed';
-    notification.style.bottom = '20px';
-    notification.style.left = '50%';
-    notification.style.transform = 'translateX(-50%)';
-    notification.style.backgroundColor = '#5d4037';
-    notification.style.color = 'white';
-    notification.style.padding = '10px 20px';
-    notification.style.borderRadius = '5px';
-    notification.style.zIndex = '1000';
-    notification.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.2)';
-    notification.style.animation = 'slideIn 0.3s ease-out';
-    
-    // Remove notification after 3 seconds
+    showToast(message);
     setTimeout(() => {
         notification.style.animation = 'slideOut 0.3s ease-out';
         setTimeout(() => notification.remove(), 300);
