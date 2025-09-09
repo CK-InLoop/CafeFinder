@@ -1,7 +1,7 @@
 // Replace with your Google Maps API key
-const apiKey = "YOUR_GOOGLE_MAPS_API_KEY";
+const apiKey = "AIzaSyDUOwyPxW9f9fFXeBytff6wNWVYUGiw4k4";
 const useProxy = true;
-const proxy = "https://cors-anywhere.herokuapp.com";
+const proxy = "https://api.allorigins.win/raw?url=";
 
 // DOM Elements
 const savedBtn = document.getElementById('savedBtn');
@@ -74,15 +74,26 @@ async function useLocation(lat, lng) {
     
     try {
         const endpoint = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=1500&type=cafe&key=${apiKey}`;
-        const url = useProxy ? `${proxy}/${endpoint}` : endpoint;
+        const url = useProxy ? `${proxy}${encodeURIComponent(endpoint)}` : endpoint;
         
+        console.log('Making request to:', url);
         const response = await fetch(url);
-        const data = await response.json();
         
-        if (data.status === 'OK' && data.results.length > 0) {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('API Response:', data);
+        
+        if (data.status === 'OK' && data.results && data.results.length > 0) {
             displayCards(data.results);
+        } else if (data.status === 'REQUEST_DENIED') {
+            throw new Error(`API Error: ${data.error_message || 'Request denied. Check your API key and enable the Places API.'}`);
+        } else if (data.status === 'ZERO_RESULTS') {
+            cardsContainer.innerHTML = '<p>No cafés found nearby. Try increasing the search radius or moving to a different location.</p>';
         } else {
-            cardsContainer.innerHTML = '<p>No cafés found nearby. Try refreshing or moving to a different location.</p>';
+            throw new Error(`API Error: ${data.status} - ${data.error_message || 'Unknown error'}`);
         }
     } catch (error) {
         console.error("Error fetching cafés:", error);
@@ -231,7 +242,7 @@ function showNotification(message) {
     notification.style.left = '50%';
     notification.style.transform = 'translateX(-50%)';
     notification.style.backgroundColor = '#5d4037';
-    notification.style.color: 'white';
+    notification.style.color = 'white';
     notification.style.padding = '10px 20px';
     notification.style.borderRadius = '5px';
     notification.style.zIndex = '1000';
