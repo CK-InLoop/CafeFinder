@@ -1,7 +1,7 @@
-// Replace with your Google Maps API key
-const apiKey = "AIzaSyDUOwyPxW9f9fFXeBytff6wNWVYUGiw4k4";
-const useProxy = true;
-const proxy = "https://api.allorigins.win/raw?url=";
+// Foursquare API Credentials
+const CLIENT_ID = 'YOUR_FOURSQUARE_CLIENT_ID';
+const CLIENT_SECRET = 'YOUR_FOURSQUARE_CLIENT_SECRET';
+const VERSION = '20230909'; // Use current date as version
 
 // DOM Elements
 const savedBtn = document.getElementById('savedBtn');
@@ -73,10 +73,22 @@ async function useLocation(lat, lng) {
     cardsContainer.appendChild(loadingDiv);
     
     try {
-        const endpoint = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=1500&type=cafe&key=${apiKey}`;
-        const url = useProxy ? `${proxy}${encodeURIComponent(endpoint)}` : endpoint;
+        // Foursquare API endpoint for searching venues
+        const endpoint = `https://api.foursquare.com/v2/venues/search`;
+        const params = new URLSearchParams({
+            client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET,
+            v: VERSION,
+            ll: `${lat},${lng}`,
+            query: 'coffee',
+            intent: 'browse',
+            radius: 1500,
+            limit: 10
+        });
         
-        console.log('Making request to:', url);
+        const url = `${endpoint}?${params.toString()}`;
+        console.log('Making request to Foursquare API');
+        
         const response = await fetch(url);
         
         if (!response.ok) {
@@ -84,16 +96,12 @@ async function useLocation(lat, lng) {
         }
         
         const data = await response.json();
-        console.log('API Response:', data);
+        console.log('Foursquare API Response:', data);
         
-        if (data.status === 'OK' && data.results && data.results.length > 0) {
-            displayCards(data.results);
-        } else if (data.status === 'REQUEST_DENIED') {
-            throw new Error(`API Error: ${data.error_message || 'Request denied. Check your API key and enable the Places API.'}`);
-        } else if (data.status === 'ZERO_RESULTS') {
-            cardsContainer.innerHTML = '<p>No cafés found nearby. Try increasing the search radius or moving to a different location.</p>';
+        if (data.response && data.response.venues && data.response.venues.length > 0) {
+            displayCards(data.response.venues);
         } else {
-            throw new Error(`API Error: ${data.status} - ${data.error_message || 'Unknown error'}`);
+            cardsContainer.innerHTML = '<p>No cafés found nearby. Try increasing the search radius or moving to a different location.</p>';
         }
     } catch (error) {
         console.error("Error fetching cafés:", error);
@@ -120,19 +128,20 @@ function displayCards(cafes) {
         wrapper.className = 'swipe-wrapper';
         wrapper.style.zIndex = 200 - index;
         
-        // Get photo reference if available
-        const imgUrl = cafe.photos?.[0]?.photo_reference
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${cafe.photos[0].photo_reference}&key=${apiKey}`
-            : 'https://via.placeholder.com/400x250?text=No+Image';
+        // Get photo if available
+        const imgUrl = cafe.bestPhoto 
+            ? `${cafe.bestPhoto.prefix}300x300${cafe.bestPhoto.suffix}`
+            : 'https://via.placeholder.com/300x200?text=No+Image';
         
         // Create cafe data object
         const cafeData = {
+            id: cafe.id,
             name: cafe.name,
-            place_id: cafe.place_id,
+            location: cafe.location,
             photo: imgUrl,
             rating: cafe.rating || 'N/A',
-            address: cafe.vicinity || 'Address not available',
-            isOpen: cafe.opening_hours?.open_now ? 'Open Now' : 'Closed'
+            address: cafe.location.formattedAddress ? cafe.location.formattedAddress.join(', ') : 'Address not available',
+            isOpen: cafe.hours ? cafe.hours.isOpen : false
         };
         
         // Create card HTML
@@ -141,9 +150,9 @@ function displayCards(cafes) {
         card.innerHTML = `
             <img src="${imgUrl}" alt="${cafe.name}" />
             <h3>${cafe.name}</h3>
-            <p>⭐ ${cafe.rating || 'N/A'}/5 (${cafe.user_ratings_total || '0'} reviews)</p>
-            <p>📍 ${cafe.vicinity || 'Address not available'}</p>
-            <p>${cafe.opening_hours?.open_now ? '🟢 Open Now' : '🔴 Closed'}</p>
+            ${cafe.rating ? `<p>⭐ ${cafe.rating}/10</p>` : ''}
+            <p>📍 ${cafe.location.formattedAddress ? cafe.location.formattedAddress.join(', ') : 'Address not available'}</p>
+            ${cafe.hours ? `<p>${cafe.hours.isOpen ? '🟢 Open Now' : '🔴 Closed'}</p>` : ''}
             <p><small>Swipe right to save 💖</small></p>
         `;
         
