@@ -1,7 +1,5 @@
-// Foursquare API Credentials
-const CLIENT_ID = 'YOUR_FOURSQUARE_CLIENT_ID';
-const CLIENT_SECRET = 'YOUR_FOURSQUARE_CLIENT_SECRET';
-const VERSION = '20230909'; // Use current date as version
+// OpenStreetMap Overpass API endpoint
+const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
 
 // DOM Elements
 const savedBtn = document.getElementById('savedBtn');
@@ -73,33 +71,61 @@ async function useLocation(lat, lng) {
     cardsContainer.appendChild(loadingDiv);
     
     try {
-        // Foursquare API endpoint for searching venues
-        const endpoint = `https://api.foursquare.com/v2/venues/search`;
-        const params = new URLSearchParams({
-            client_id: CLIENT_ID,
-            client_secret: CLIENT_SECRET,
-            v: VERSION,
-            ll: `${lat},${lng}`,
-            query: 'coffee',
-            intent: 'browse',
-            radius: 1500,
-            limit: 10
+        // Overpass QL query to find cafes and coffee shops near the location
+        const query = `
+            [out:json];
+            (
+              node["amenity"="cafe"](around:1500,${lat},${lng});
+              node["amenity"="coffee_shop"](around:1500,${lat},${lng});
+              node["shop"="coffee"](around:1500,${lat},${lng});
+            );
+            out body;
+            >;
+            out skel qt;
+        `;
+
+        console.log('Making request to OpenStreetMap Overpass API');
+        const response = await fetch(OVERPASS_API, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `data=${encodeURIComponent(query)}`
         });
-        
-        const url = `${endpoint}?${params.toString()}`;
-        console.log('Making request to Foursquare API');
-        
-        const response = await fetch(url);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
         const data = await response.json();
-        console.log('Foursquare API Response:', data);
+        console.log('OpenStreetMap API Response:', data);
         
-        if (data.response && data.response.venues && data.response.venues.length > 0) {
-            displayCards(data.response.venues);
+        if (data.elements && data.elements.length > 0) {
+            // Filter out duplicate nodes and keep only cafes with names
+            const uniqueCafes = [];
+            const seenIds = new Set();
+            
+            data.elements.forEach(cafe => {
+                if (cafe.tags && cafe.tags.name && !seenIds.has(cafe.id)) {
+                    seenIds.add(cafe.id);
+                    uniqueCafes.push({
+                        id: cafe.id,
+                        name: cafe.tags.name,
+                        tags: cafe.tags,
+                        lat: cafe.lat,
+                        lon: cafe.lon,
+                        address: cafe.tags['addr:street'] ? 
+                            `${cafe.tags['addr:street']}${cafe.tags['addr:housenumber'] ? ' ' + cafe.tags['addr:housenumber'] : ''}` : 
+                            'Address not available'
+                    });
+                }
+            });
+            
+            if (uniqueCafes.length > 0) {
+                displayCards(uniqueCafes);
+            } else {
+                cardsContainer.innerHTML = '<p>No cafés found nearby. Try increasing the search radius or moving to a different location.</p>';
+            }
         } else {
             cardsContainer.innerHTML = '<p>No cafés found nearby. Try increasing the search radius or moving to a different location.</p>';
         }
@@ -128,32 +154,41 @@ function displayCards(cafes) {
         wrapper.className = 'swipe-wrapper';
         wrapper.style.zIndex = 200 - index;
         
-        // Get photo if available
-        const imgUrl = cafe.bestPhoto 
-            ? `${cafe.bestPhoto.prefix}300x300${cafe.bestPhoto.suffix}`
-            : 'https://via.placeholder.com/300x200?text=No+Image';
-        
-        // Create cafe data object
+        // Create cafe data object with OpenStreetMap data
         const cafeData = {
             id: cafe.id,
             name: cafe.name,
-            location: cafe.location,
-            photo: imgUrl,
-            rating: cafe.rating || 'N/A',
-            address: cafe.location.formattedAddress ? cafe.location.formattedAddress.join(', ') : 'Address not available',
-            isOpen: cafe.hours ? cafe.hours.isOpen : false
+            address: cafe.address,
+            tags: cafe.tags || {},
+            lat: cafe.lat,
+            lon: cafe.lon
         };
+        
+        // Create a nice description from available tags
+        let description = '';
+        if (cafe.tags) {
+            if (cafe.tags.cuisine) description += `Cuisine: ${cafe.tags.cuisine}<br>`;
+            if (cafe.tags['opening_hours']) description += `Hours: ${cafe.tags['opening_hours']}<br>`;
+            if (cafe.tags.website) description += `<a href="${cafe.tags.website}" target="_blank">Website</a> `;
+            if (cafe.tags.phone) description += ` | Phone: ${cafe.tags.phone}`;
+        }
         
         // Create card HTML
         const card = document.createElement('div');
         card.className = 'location-card';
         card.innerHTML = `
-            <img src="${imgUrl}" alt="${cafe.name}" />
-            <h3>${cafe.name}</h3>
-            ${cafe.rating ? `<p>⭐ ${cafe.rating}/10</p>` : ''}
-            <p>📍 ${cafe.location.formattedAddress ? cafe.location.formattedAddress.join(', ') : 'Address not available'}</p>
-            ${cafe.hours ? `<p>${cafe.hours.isOpen ? '🟢 Open Now' : '🔴 Closed'}</p>` : ''}
-            <p><small>Swipe right to save 💖</small></p>
+            <div class="cafe-header">
+                <h3>${cafe.name}</h3>
+                <p>📍 ${cafe.address}</p>
+            </div>
+            <div class="cafe-details">
+                ${description ? `<p>${description}</p>` : ''}
+                <div class="cafe-actions">
+                    ${cafe.tags.website ? `<a href="${cafe.tags.website}" target="_blank" class="btn">Visit Website</a>` : ''}
+                    ${cafe.tags.phone ? `<a href="tel:${cafe.tags.phone}" class="btn">Call Now</a>` : ''}
+                </div>
+                <p class="save-hint"><small>Swipe right to save 💖</small></p>
+            </div>
         `;
         
         wrapper.appendChild(card);
