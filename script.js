@@ -71,13 +71,33 @@ async function useLocation(lat, lng) {
     cardsContainer.appendChild(loadingDiv);
     
     try {
+        // First, log the coordinates we're using
+        console.log('Searching for cafes near:', lat, lng);
+        
         // Overpass QL query to find cafes and coffee shops near the location
         const query = `
             [out:json];
             (
-              node["amenity"="cafe"](around:1500,${lat},${lng});
-              node["amenity"="coffee_shop"](around:1500,${lat},${lng});
-              node["shop"="coffee"](around:1500,${lat},${lng});
+              // Search for cafes and coffee shops
+              node["amenity"="cafe"](around:20000,${lat},${lng});
+              node["amenity"="coffee_shop"](around:20000,${lat},${lng});
+              node["shop"="coffee"](around:20000,${lat},${lng});
+              
+              // Also search for restaurants that might serve coffee
+              node["amenity"="restaurant"]["cuisine"~"coffee|cafe"](around:20000,${lat},${lng});
+              
+              // Search for any food/drink related places that might serve coffee
+              node["amenity"~"cafe|restaurant|bar|fast_food"]["name"~"[Cc]afe|[Cc]offee",i](around:20000,${lat},${lng});
+            );
+            out body;
+            >;
+            out skel qt;
+            
+            // Also try to get some way data which might have more complete information
+            (
+              way["amenity"="cafe"](around:20000,${lat},${lng});
+              way["amenity"="coffee_shop"](around:20000,${lat},${lng});
+              way["shop"="coffee"](around:20000,${lat},${lng});
             );
             out body;
             >;
@@ -85,49 +105,76 @@ async function useLocation(lat, lng) {
         `;
 
         console.log('Making request to OpenStreetMap Overpass API');
-        const response = await fetch(OVERPASS_API, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: `data=${encodeURIComponent(query)}`
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        console.log('OpenStreetMap API Response:', data);
-        
-        if (data.elements && data.elements.length > 0) {
-            // Filter out duplicate nodes and keep only cafes with names
-            const uniqueCafes = [];
+        try {
+            const response = await fetch(OVERPASS_API, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `data=${encodeURIComponent(query)}`
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('API Error Response:', errorText);
+                throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+            }
+            
+            const data = await response.json();
+            console.log('OpenStreetMap API Response:', data);
+            
+            // If no elements found, try a broader search
+            if (!data.elements || data.elements.length === 0) {
+                console.log('No cafes found in the immediate area, trying a broader search...');
+                return await searchBroaderArea(lat, lng);
+            }
+            
+            // Process the data
+            const cafes = [];
             const seenIds = new Set();
             
-            data.elements.forEach(cafe => {
-                if (cafe.tags && cafe.tags.name && !seenIds.has(cafe.id)) {
-                    seenIds.add(cafe.id);
-                    uniqueCafes.push({
-                        id: cafe.id,
-                        name: cafe.tags.name,
-                        tags: cafe.tags,
-                        lat: cafe.lat,
-                        lon: cafe.lon,
-                        address: cafe.tags['addr:street'] ? 
-                            `${cafe.tags['addr:street']}${cafe.tags['addr:housenumber'] ? ' ' + cafe.tags['addr:housenumber'] : ''}` : 
-                            'Address not available'
+            data.elements.forEach(item => {
+                if (item.tags && item.tags.name && !seenIds.has(item.id)) {
+                    seenIds.add(item.id);
+                    
+                    // Create address from available tags
+                    let address = 'Address not available';
+                    if (item.tags['addr:street']) {
+                        address = item.tags['addr:street'];
+                        if (item.tags['addr:housenumber']) {
+                            address = `${item.tags['addr:housenumber']} ${address}`;
+                        }
+                        if (item.tags['addr:city']) {
+                            address += `, ${item.tags['addr:city']}`;
+                        }
+                    }
+                    
+                    cafes.push({
+                        id: item.id,
+                        name: item.tags.name,
+                        address: address,
+                        tags: item.tags,
+                        lat: item.lat || (item.center && item.center.lat) || null,
+                        lon: item.lon || (item.center && item.center.lon) || null
                     });
                 }
             });
             
-            if (uniqueCafes.length > 0) {
-                displayCards(uniqueCafes);
+            if (cafes.length > 0) {
+                displayCards(cafes);
             } else {
-                cardsContainer.innerHTML = '<p>No cafés found nearby. Try increasing the search radius or moving to a different location.</p>';
+                console.log('No valid cafes found in the response, trying broader search...');
+                return await searchBroaderArea(lat, lng);
             }
-        } else {
-            cardsContainer.innerHTML = '<p>No cafés found nearby. Try increasing the search radius or moving to a different location.</p>';
+        } catch (error) {
+            console.error('Error in API request:', error);
+            cardsContainer.innerHTML = `
+                <div class="error-message">
+                    <p>Error: ${error.message}</p>
+                    <button id="retryBtn" class="btn">Retry</button>
+                </div>
+            `;
+            document.getElementById('retryBtn')?.addEventListener('click', getLocation);
         }
     } catch (error) {
         console.error("Error fetching cafés:", error);
@@ -137,12 +184,122 @@ async function useLocation(lat, lng) {
     }
 }
 
+// Function to search a broader area if no cafes found nearby
+async function searchBroaderArea(lat, lng) {
+    console.log('Trying broader area search...');
+    const broaderQuery = `
+        [out:json];
+        (
+          node["amenity"~"cafe|coffee_shop|restaurant"]["name"~"[Cc]afe|[Cc]offee",i](around:50000,${lat},${lng});
+          way["amenity"~"cafe|coffee_shop|restaurant"]["name"~"[Cc]afe|[Cc]offee",i](around:50000,${lat},${lng});
+        );
+        out body;
+        >;
+        out skel qt;
+    `;
+    
+    try {
+        const response = await fetch(OVERPASS_API, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `data=${encodeURIComponent(broaderQuery)}`
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Broader area search results:', data);
+        
+        if (data.elements && data.elements.length > 0) {
+            const cafes = processOsmData(data.elements);
+            if (cafes.length > 0) {
+                displayCards(cafes);
+                return;
+            }
+        }
+        
+        // If still no results, show a more helpful message
+        cardsContainer.innerHTML = `
+            <div class="no-results">
+                <h3>No cafés found nearby</h3>
+                <p>We couldn't find any cafés in your area. This could be because:</p>
+                <ul>
+                    <li>There are no cafés mapped in OpenStreetMap in your area</li>
+                    <li>Your location might be set to a remote area</li>
+                    <li>There might be an issue with the location services</li>
+                </ul>
+                <p>Try moving to a different location or check the browser console for more details.</p>
+                <button id="tryAgainBtn" class="btn">Try Again</button>
+            </div>
+        `;
+        
+        document.getElementById('tryAgainBtn')?.addEventListener('click', getLocation);
+        
+    } catch (error) {
+        console.error('Error in broader area search:', error);
+        cardsContainer.innerHTML = `
+            <div class="error-message">
+                <p>Error searching for cafés: ${error.message}</p>
+                <button id="retryBtn" class="btn">Retry</button>
+            </div>
+        `;
+        document.getElementById('retryBtn')?.addEventListener('click', getLocation);
+    }
+}
+
+// Process OSM data into a consistent format
+function processOsmData(elements) {
+    const cafes = [];
+    const seenIds = new Set();
+    
+    elements.forEach(item => {
+        // Skip if no name or already seen
+        if ((!item.tags || !item.tags.name) || seenIds.has(item.id)) return;
+        
+        seenIds.add(item.id);
+        
+        // Create address from available tags
+        let address = 'Address not available';
+        if (item.tags['addr:street']) {
+            address = item.tags['addr:street'];
+            if (item.tags['addr:housenumber']) {
+                address = `${item.tags['addr:housenumber']} ${address}`;
+            }
+            if (item.tags['addr:city']) {
+                address += `, ${item.tags['addr:city']}`;
+            }
+        }
+        
+        cafes.push({
+            id: item.id,
+            name: item.tags.name,
+            address: address,
+            tags: item.tags,
+            lat: item.lat || (item.center && item.center.lat) || null,
+            lon: item.lon || (item.center && item.center.lon) || null
+        });
+    });
+    
+    return cafes;
+}
+
 // Display cafe cards
 function displayCards(cafes) {
     cardsContainer.innerHTML = '';
     
     if (!cafes || cafes.length === 0) {
-        cardsContainer.innerHTML = '<p>No cafés found. Please try again later.</p>';
+        cardsContainer.innerHTML = `
+            <div class="no-results">
+                <h3>No cafés found</h3>
+                <p>We couldn't find any cafés in your area. Try moving to a different location.</p>
+                <button id="refreshBtn" class="btn">Try Again</button>
+            </div>
+        `;
+        document.getElementById('refreshBtn')?.addEventListener('click', getLocation);
         return;
     }
     
